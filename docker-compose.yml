@@ -2,6 +2,17 @@
 #
 # Sign-in has to happen once by hand before this is useful: the profile in
 # data-dir starts logged out. See the Docker section of the README.
+#
+# Login mode (once per account) — opens a browser in the container's virtual
+# display and exposes it over noVNC on http://localhost:6080:
+#
+#   docker compose run --rm -p 6080:6080 rewards-farmer login
+#
+# For a named account:
+#
+#   REWARDS_ACCOUNTS=personal docker compose run --rm -p 6080:6080 rewards-farmer login
+#
+# The port mapping is only needed for login; the normal run below opens nothing.
 
 services:
   rewards-farmer:
@@ -25,10 +36,15 @@ services:
       REWARDS_ACCOUNTS: ${REWARDS_ACCOUNTS:-}
       OLLAMA_HOST: ${OLLAMA_HOST:-}
     volumes:
-      # Keeps the sign-in across container rebuilds.
-      - ./data-dir:/app/data-dir
+      # Named volume: keeps the sign-in across container rebuilds, isolated
+      # from any data-dir on the host so there is no conflict with a native
+      # (non-Docker) run. Docker manages it under /var/lib/docker/volumes.
+      - rewards-data:/app/data-dir
       # The visual search task uploads this file, which is gitignored and so is
       # never in the image. Create it first with
       # `python src/random_image_for_visual_search.py`; a path that does not
       # exist yet is mounted as an empty directory rather than a file.
       - ./visual_search.jpg:/app/visual_search.jpg:ro
+
+volumes:
+  rewards-data:

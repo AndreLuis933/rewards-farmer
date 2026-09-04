@@ -13,10 +13,14 @@ FROM python:3.12-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Edge, from Microsoft's own repository.
+# Edge, from Microsoft's own repository, plus the X11/VNC/noVNC stack used only
+# by the login mode of docker-entrypoint.sh. The run mode never starts any of
+# it, so the extra packages add weight to the image but nothing to a normal run.
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		ca-certificates curl gnupg unzip fonts-liberation \
+		xvfb x11vnc fluxbox xauth xfonts-base novnc websockify \
+		xclip xsel dbus dbus-x11 \
 	&& curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
 		| gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
 	&& echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/edge stable main" \
@@ -42,6 +46,8 @@ RUN pip install --no-cache-dir "selenium>=4.46.0,<5.0.0" "numpy"
 
 COPY src/ ./src/
 COPY nouns.txt ./
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Headless because there is no display, and trends because there is no model.
 ENV REWARDS_HEADLESS=1 \
@@ -51,4 +57,7 @@ ENV REWARDS_HEADLESS=1 \
 # Sign-in lives here, so it has to outlive the container.
 VOLUME ["/app/data-dir"]
 
-CMD ["python", "src/main.py"]
+# `login` starts Xvfb + noVNC so you can sign in by hand once; anything else (or
+# no argument) runs the bot headless.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["run"]

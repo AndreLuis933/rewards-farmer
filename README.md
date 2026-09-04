@@ -93,25 +93,55 @@ docker compose run --rm rewards-farmer
 
 The container defaults to `QUERY_SOURCE=trends`, so it needs no Ollama account and no model. Set `QUERY_SOURCE=llm` and `OLLAMA_HOST` to a reachable address to use a model instead.
 
-**Sign in first.** The profile in `data-dir` starts logged out and the container has no display to sign in with, so do it once on the host with a normal Edge window and let the volume carry it in:
+**Sign in first.** The profile starts logged out and the container has no physical display, so sign-in happens inside the container over a virtual display exposed through noVNC — a web page you open in your normal browser. This works on Windows, macOS and Linux hosts, because the profile is created and read back by the same Linux container, so the Chromium cookie key is consistent between them.
 
-```
-msedge --user-data-dir="<repo>\data-dir" --profile-directory=Default https://rewards.bing.com
-```
+The profile lives in a **named Docker volume** (`rewards-data`), not a bind mount, so it is isolated from any `data-dir` used by a native (non-Docker) run on the host. Docker manages it under `/var/lib/docker/volumes`; it survives container rebuilds and is shared between login and run mode.
 
-Close every window of that profile afterwards, and close them normally rather than killing the browser. Chromium allows one process per profile directory, so a window left open on the host stops the container from starting. A profile whose browser was killed is worse: it keeps a `SingletonLock` naming the machine that wrote it, the container reads that as the profile being open somewhere else, and it exits during startup with the same error a genuinely open window produces.
+### One-time sign-in (single account)
 
-**This does not work from a Windows host.** Chromium encrypts cookie values with a key held by the operating system, and on Windows that key is wrapped with DPAPI and tied to the Windows account that wrote it. The Linux container has no DPAPI, so it cannot unwrap the key and every cookie in the profile is unreadable to it. The volume carries the file in and the browser then ignores its contents: a profile signed in on the host reported 73 cookies on disk, of which Edge in the container could read 19 — the ones it had just set itself — while `.MSA.Auth` and `ANON`, the cookies the sign-in actually rests on, came back absent. The container starts, looks healthy and behaves as though it were logged out.
-
-Sign-in has to happen wherever the container will read it, so on a Windows host run the bot directly instead:
+Build the image, then run it in login mode, mapping port 6080:
 
 ```sh
-python src/main.py
+docker compose run --rm -p 6080:6080 rewards-farmer login
 ```
 
-**A Linux host does work.** With no keyring running Chromium falls back to a fixed key, which is the case both on a plain Linux host and inside the image, so the volume carries a working sign-in straight in. Measured: a profile signed in on the host opened in the container already on `rewards.bing.com/dashboard` and earned from it.
+Open <http://localhost:6080/vnc.html> in a browser on the host. You will see an Edge window pointing at `rewards.bing.com`. Sign in with your Microsoft account there, on both Bing and `rewards.bing.com`.
 
-macOS is expected to fail the way Windows does, since it wraps the key with the login Keychain and the container cannot reach that either, but that case was not tested.
+EU users: accept the consent banner once on `rewards.bing.com` and on `bing.com`. The choice is saved to the profile and applies to every later run.
+
+When signed in, **close Edge normally** (close the tab/window, or use Edge's menu → Quit). Closing Edge cleanly lets the container exit on its own and leaves the profile ready. If you kill the container with `Ctrl+C` or `docker kill`, Edge leaves a `SingletonLock` behind — the entrypoint removes stale locks automatically on the next run, but it is still cleaner to close Edge first.
+
+### One-time sign-in (multiple accounts)
+
+`REWARDS_ACCOUNTS` takes a comma separated list; each name gets its own directory under `data-dir`. Sign in **one account at a time** — pass only the first name in the list for each login run:
+
+```sh
+REWARDS_ACCOUNTS=personal docker compose run --rm -p 6080:6080 rewards-farmer login
+# close Edge when done, then:
+REWARDS_ACCOUNTS=spare docker compose run --rm -p 6080:6080 rewards-farmer login
+```
+
+On Windows (PowerShell):
+
+```powershell
+$env:REWARDS_ACCOUNTS="personal"; docker compose run --rm -p 6080:6080 rewards-farmer login
+```
+
+### Daily run
+
+After the one-time sign-in, run the bot headless — no port mapping, no display:
+
+```sh
+docker compose run --rm rewards-farmer
+```
+
+With multiple accounts:
+
+```sh
+REWARDS_ACCOUNTS=personal,spare docker compose run --rm rewards-farmer
+```
+
+`REWARDS_HEADLESS=1` is set in the image. It also works on the host if you want a run with no visible window; the pointer code needs an explicit window size in that mode, which `main.py` sets.
 
 **Provide the visual search image on the host too.** `visual_search.jpg` is not in the repository and is not built into the image, so create it once in the project root and the compose file mounts it in:
 
@@ -121,13 +151,17 @@ python src/random_image_for_visual_search.py
 
 Without it every other task still runs; only the visual search one fails.
 
-Multiple accounts work the same way in the container:
+### On a VPS
+
+The same flow works on a Linux VPS. For the sign-in step, tunnel port 6080 to your local machine instead of opening it publicly:
 
 ```sh
-REWARDS_ACCOUNTS=personal,spare docker compose run --rm rewards-farmer
+ssh -L 6080:localhost:6080 user@your-vps
+# then on the VPS:
+docker compose run --rm -p 6080:6080 rewards-farmer login
 ```
 
-`REWARDS_HEADLESS=1` is set in the image. It also works on the host if you want a run with no visible window; the pointer code needs an explicit window size in that mode, which `main.py` sets.
+Open <http://localhost:6080/vnc.html> on your local browser as usual.
 
 # Logging
 
