@@ -9,3 +9,4 @@ data-dir/
 __pycache__/
 .env
 *.tar.gz
+*.log
